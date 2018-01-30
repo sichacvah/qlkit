@@ -42,7 +42,7 @@
                            ;; To console.log CLJS data-structures make sure you enable devtools in Chrome
                            ;; https://github.com/binaryage/cljs-devtools
                            :install-deps         true
-                           :npm-deps             {:create-react-class "15.6.0"}
+                          ;  :npm-deps             {:create-react-class "15.6.0"}
                            :preloads             [devtools.preload]}}
                ;; This next build is a compressed minified build for
                ;; production. You can build this with:
@@ -56,14 +56,14 @@
                            :language-out   :ecmascript3
                            :optimizations  :advanced
                            :pretty-print   false
-                           :install-deps   true
-                           :npm-deps       {:create-react-class "15.6.0"}}}]}
+                           :install-deps   true}}]}
+                          ;  :npm-deps       {:create-react-class "15.6.0"}}}]}
   
   :figwheel {;; :http-server-root "public" ;; default and assumes "resources"
              ;; :server-port 3449 ;; default
              ;; :server-ip "127.0.0.1"
 
-             :css-dirs ["resources/public/css"] ;; watch and update CSS
+             :css-dirs ["resources/public/css"]} ;; watch and update CSS
 
              ;; Start an nREPL server into the running figwheel process
              ;; :nrepl-port 7888
@@ -96,7 +96,7 @@
 
              ;; to pipe all the output to the repl
              ;; :server-logfile false
-             }
+             
 
 
   ;; Setting up nREPL for Figwheel and ClojureScript dev
