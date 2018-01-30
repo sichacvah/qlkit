@@ -1,9 +1,10 @@
 (ns qlkit.core
-  (:require #?@(:cljs [[react-dom :refer [render]]
-                       [react :refer [createElement]]
-                       [create-react-class :refer [createReactClass]]])
+  (:require #?@(:cljs [[cljsjs.react.dom]
+                       [goog.object :as gobj]
+                       [cljsjs.react]])
             [qlkit.spec :as spec]
             [clojure.string :as st]))
+
 
 #?(:clj
    (defmacro defcomponent* [nam & bodies]
@@ -97,6 +98,7 @@
   (parse-query-into-map (drop 2 query-term) (assoc env ::parent-env (assoc env ::query-key (first query-term)))))
 
 (def classes (atom {}))
+(def mounted-component (atom nil))
 
 (declare react-class)
 
@@ -203,11 +205,25 @@
 
 (declare refresh)
 
+(defn react-render [component node]
+  (js/ReactDOM.render component node)
+  nil)
+
 (defn mount [args]
   "This is used to mount qlkit tied to a dom element (or without a dom element, when used on the server.) The args map can contain :parsers (the map of parsers) :component (The name of the root qlkit component) :state (a state atom) and :remote-handler (function to call for sending out changes to the server). Only one mount can be set up on the client, and one on the server."
   (assert (map? args) "QlKit needs a Map argument defining the options.")
   (reset! mount-info args)
-  (refresh true))
+  (let [query (get-query (:component @mount-info))
+        atts  (parse-query-into-map query {})
+        node  (:dom-element @mount-info)]
+    (reset! mounted-component (@make-root-component (create-instance (:component @mount-info) atts)
+                                (:dom-element @mount-info)))
+    (when (some? node) (react-render @mounted-component node))
+    (refresh true)
+    nil))
+
+
+
 
 (defn perform-remote-query [query]
   "This calls the remote handler to process the remote query and offers up a callback that is called when the server has returned the results from the query."
@@ -276,31 +292,30 @@
            
            (defn- react-class [class]
              "Creates a react class from the qlkit class description format"
-             (js/createReactClass (let [mount (:component-did-mount class)
-                                        unmount (:component-will-unmount class)
-                                        obj #js {:shouldComponentUpdate (fn [next-props next-state]
-                                                                          (this-as this
-                                                                            (or (not= (clj-atts (.-props this)) (clj-atts next-props))
-                                                                                (not= (clj-state (.-state this)) (clj-state next-state)))))
-                                                 :getInitialState       (fn []
-                                                                          #js {:state (or (:state class) {})})
-                                                 :render                (fn []
-                                                                          (this-as this
-                                                                            (reduce (fn [acc item]
-                                                                                      (item this acc))
-                                                                                    ((:render class) this (clj-atts (.-props this)) (clj-state (.-state this)))
-                                                                                    @rendering-middleware)))}]
-                                    (when mount
-                                      (set! (.-componentDidMount obj)
-                                            (fn []
+             (let [mount                   (:component-did-mount class)
+                   unmount                 (:component-will-unmount class)
+                   should-component-update (fn [next-props next-state]
+                                             (this-as this
+                                              (or (not= (clj-atts (.-props this)) (clj-atts next-props))
+                                                  (not= (clj-state (.-state this)) (clj-state next-state)))))
+                   get-initial-state       (fn [] #js {:state (or (some? (:state class)) {})})
+                   render                  (fn [] (this-as this)
+                                            (reduce (fn [acc item] (item this acc))
+                                                    ((:render class) this (clj-atts (.-props this)) (clj-state (.-state this)))
+                                                    @rendering-middleware))
+                   constructor             (fn [props]
                                               (this-as this
-                                                (mount this)))))
-                                    (when unmount
-                                      (set! (.-componentWillUnmount obj)
-                                            (fn []
-                                              (this-as this
-                                                (unmount (clj-state (.-state this)))))))
-                                    obj)))
+                                                (gobj/set this "state" (get-initial-state))
+                                                (.call js/React.Component this props)))
+                   _                       (goog/inherits constructor js/React.Component)
+                   prototype               (gobj/get constructor "prototype")]
+                (when-not (empty? mount)
+                  (gobj/set prototype "componentDidMount" mount))
+                (when-not (empty? unmount)
+                  (gobj/set prototype "componentWillUnmount" mount))
+                (gobj/set prototype "shouldComponentUpdate" should-component-update)
+                (gobj/set prototype "render" render)
+                ctor))
            
            (defn update-state!* [this fun & args]
              "Update the component-local state with the given function"
@@ -311,16 +326,16 @@
 
            (defn create-instance [component atts]
              (createElement (::react-class (@classes component)) #js {:atts atts  :env (::env atts) :query (::query atts)}))
-           
+
            (defn- refresh [remote-query?]
              "Force a redraw of the entire UI. This will trigger local parsers to gather data, and optionally will fetch data from server as well."
-             (let [query (get-query (:component @mount-info))
-                   atts       (parse-query-into-map query {})
-                   {{spec :spec} :parsers} @mount-info]
-               (spec/query-spec (vec query))
-               (when spec
-                 (spec (vec query) :synchronous))
-               (when remote-query?
-                 (perform-remote-query (parse-query-remote query)))
-               (render (@make-root-component (create-instance (:component @mount-info) atts))
-                       (:dom-element @mount-info)))))) 
+              (let [query (get-query (:component @mount-info))
+                    {{spec :spec} :parsers} @mount-info]
+                  (spec/query-spec (vec query))
+                  (when (some? spec)
+                    (spec (vec query) :synchronous))
+                  (when (some? remote-query?)
+                    (perform-remote-query (parse-query-remote query)))
+                  (when (some? @mounted-component)
+                    (.forceUpdate @mounted-component))))))
+
